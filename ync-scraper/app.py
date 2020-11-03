@@ -34,6 +34,18 @@ SNS_TOPIC_ARN = 'arn:aws:sns:eu-west-1:466873411642:YNCTextNotifications'
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def remove_sold_cars():
+    cars = YncListing.scan()
+    if cars.last_evaluated_key:
+        for car in cars:
+            if car._VehicleId not in active_listings:
+                car.delete()
+        while cars.last_evaluated_key is not None:
+            cars = YncListing.scan(last_evaluated_key=cars.last_evaluated_key)
+            for car in cars:
+                if car._VehicleId not in active_listings:
+                    car.delete()
+
 def convert_price_to_int(price):
     parsed_price = price.replace('£', '')
     parsed_price = parsed_price.replace(' ', '')
@@ -189,12 +201,6 @@ def lambda_handler(event, context):
         
             database_item.save()
 
-    for active_listing in active_listings:
-        database_item = YncListing.get(int(active_listing))
-        if database_item._VehicleId:
-            continue
-        else:
-            log.info(f'Deleting car {database_item.VehicleId}')
-            database_item.delete()
+    remove_sold_cars()
 
 lambda_handler("", "")
