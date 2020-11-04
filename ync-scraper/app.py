@@ -31,8 +31,11 @@ RESULT_CLASS_NAME = "container vehicle results-prestige youtube veh-loc-1"
 AI_READY_NUMBERPLATE_REGEX = '(^[A-Z]{2}[A-Z0-9]{2}\s?[A-Z]{3}$)|(^[A-Z][0-9]{1,3}[A-Z]{3}$)|(^[A-Z]{3}[0-9]{1,3}[A-Z]$)|(^[0-9]{1,4}[A-Z]{1,2}$)|(^[0-9]{1,3}[A-Z]{1,3}$)|(^[A-Z]{1,2}[0-9]{1,4}$)|(^[A-Z]{1,3}[0-9]{1,3}$)|(^[A-Z]{1,3}[0-9]{1,4}$)|(^[0-9]{3}[DX]{1}[0-9]{3}$)'
 SNS_TOPIC_ARN = 'arn:aws:sns:eu-west-1:466873411642:YNCTextNotifications'
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
+if logger.handlers:
+    for handler in logger.handlers:
+        logger.removeHandler(handler)
+logging.basicConfig(level=logging.INFO)
 
 def remove_sold_cars():
     cars = YncListing.scan()
@@ -46,7 +49,7 @@ def remove_sold_cars():
                 if car._VehicleId not in active_listings:
                     car.delete()
 
-def convert_price_to_int(price):
+def cast_price_to_int(price):
     parsed_price = price.replace('£', '')
     parsed_price = parsed_price.replace(' ', '')
     parsed_price = parsed_price.replace(',', '')
@@ -149,7 +152,7 @@ def lambda_handler(event, context):
         try:
             database_item = YncListing.get(int(vehicle_id))
             database_item.VehicleId = database_item._VehicleId
-            vehicle_price = convert_price_to_int(car.find(class_='price-is').next)
+            vehicle_price = cast_price_to_int(car.find(class_='price-is').next)
             if vehicle_price != database_item.VehiclePriceNumber:
                 publish_price_change_notification(database_item, database_item.VehiclePriceNumber,vehicle_price)
                 database_item.VehiclePriceNumber = vehicle_price
@@ -194,7 +197,7 @@ def lambda_handler(event, context):
             database_item.VehicleTitle = str(vehicle_title)
             database_item.VehicleDescription = str(vehicle_description)
             database_item.VehicleMileage = str(vehicle_mileage)
-            database_item.VehiclePriceNumber = int(convert_price_to_int(vehicle_price))
+            database_item.VehiclePriceNumber = int(cast_price_to_int(vehicle_price))
             database_item.VehicleFeatures = list(features)
             database_item.ListingLink = str(f'{BASE_URL}{vehicle_page_suffix}')
             publish_new_car_notification(database_item)
