@@ -31,11 +31,15 @@ def remove_sold_cars():
         for car in cars:
             if car._VehicleId not in active_listings:
                 car.delete()
+                sold_cars.append(car)
+                # publish_vehicle_sold_notification(car)
         while cars.last_evaluated_key is not None:
             cars = YncListing.scan(last_evaluated_key=cars.last_evaluated_key)
             for car in cars:
                 if car._VehicleId not in active_listings:
                     car.delete()
+                    sold_cars.append(car)
+                    # publish_vehicle_sold_notification(car)
 
 def cast_price_to_int(price):
     parsed_price = price.replace('£', '')
@@ -43,35 +47,53 @@ def cast_price_to_int(price):
     parsed_price = parsed_price.replace(',', '')
     return int(parsed_price)
 
-def publish_new_car_notification(database_item: YncListing):
+def publish_new_car_notification(new_cars):
+    if len(new_cars) <= 0:
+        return None
     logger.info("Attempting to send new car notification")
-    message = f"""
-        A new car has been listed on YNC!
-        {database_item.VehicleTitle}
-        {database_item.VehicleDescription}
-        Mileage: {database_item.VehicleMileage}
-        Price: £{database_item.VehiclePriceNumber}
-        {database_item.ListingLink}
-        """
+    message = ""
+    for car in new_cars:
+        new_car_info = f"""
+            A new car has been listed on YNC!
+            {car.VehicleTitle}
+            {car.VehicleDescription}
+            Mileage: {car.VehicleMileage}
+            Price: £{car.VehiclePriceNumber}
+            {car.ListingLink}
+            """
+        message += "\n\n"
+        message += new_car_info
     publisher.publish("A new car has been listed on YNC!", message)
 
-def publish_price_change_notification(database_item: YncListing, old_price, new_price):
+def publish_price_change_notification(changed_cars):
+    if len(changed_cars) <= 0:
+        return None
     logger.info("Attempting to send price change notification")
-    message = f"""
-        A car listed on YNC has changed in price!
-        {database_item.VehicleTitle}
-        Old Price: £{old_price}
-        New Price: £{new_price}
-        {database_item.ListingLink}
-        """
+    message = ""
+    for car in changed_cars:
+        changed_car_info = f"""
+            A car listed on YNC has changed in price!
+            {car['database_item'].VehicleTitle}
+            Old Price: £{car['old_price']}
+            New Price: £{car['new_price']}
+            {car['database_item'].ListingLink}
+            """
+        message += "\n\n"
+        message += changed_car_info
     publisher.publish("A car has change in price on YNC!", message)
 
-def publish_vehicle_sold_notification(database_item: YncListing):
+def publish_vehicle_sold_notification(sold_cars):
+    if len(sold_cars) <= 0:
+        return None
     logger.info("Attempting to send vehicle sold notification")
-    message = f"""
-        A car listed on YNC has been sold! :(
-        {database_item.VehicleTitle}
-        """
+    message = ""
+    for car in sold_cars:
+        sold_car_info = f"""
+            A car listed on YNC has been sold! :(
+            {database_item.VehicleTitle}
+            """
+        message += "\n\n"
+        message += sold_car_info
     publisher.publish("A car listed on YNC has been sold!", message)
     
 def lambda_handler(event, context):
@@ -88,6 +110,9 @@ def lambda_handler(event, context):
             cars.append(listing)
 
     active_listings = list()
+    sold_cars = list()
+    changed_cars = list()
+    new_cars = list()
 
     for car in cars:
         vehicle_title_section = car.find(class_="eightcol vehicle-title")
@@ -104,7 +129,12 @@ def lambda_handler(event, context):
             vehicle_price = cast_price_to_int(car.find(class_='price-is').next)
             logger.info(f"Checking {vehicle_id} price, last: {database_item.VehiclePriceNumber} current: {vehicle_price}")
             if vehicle_price != database_item.VehiclePriceNumber:
-                publish_price_change_notification(database_item, database_item.VehiclePriceNumber,vehicle_price)
+                changed_cars.append({
+                    "database_item" : database_item,
+                    "old_price" : database_item.VehiclePriceNumber,
+                    "new_price" : vehicle_price
+                })
+                # publish_price_change_notification(database_item, database_item.VehiclePriceNumber,vehicle_price)
                 database_item.VehiclePriceNumber = vehicle_price
                 database_item.save()
 
@@ -150,10 +180,14 @@ def lambda_handler(event, context):
             database_item.VehiclePriceNumber = int(cast_price_to_int(vehicle_price))
             database_item.VehicleFeatures = list(features)
             database_item.ListingLink = str(f'{BASE_URL}{vehicle_page_suffix}')
-            publish_new_car_notification(database_item)
+            new_cars.append(database_item)
+            # publish_new_car_notification(database_item)
         
             database_item.save()
 
+    publish_new_car_notification(new_cars)
+    publish_price_change_notification(changed_cars)
+    publish_vehicle_sold_notification(sold_cars)
     remove_sold_cars()
 
 lambda_handler("", "")
