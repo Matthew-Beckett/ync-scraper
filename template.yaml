@@ -10,6 +10,14 @@ Globals:
   Function:
     Timeout: 3
 
+Parameters:
+  SenderAddress:
+    Type: String
+    Description: The email address to send email notifications from
+  RecipientAddress:
+    Type: String
+    Description: The email address to send notifications to
+
 Resources:
   YncScraperFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -18,6 +26,10 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.8
       Timeout: 720
+      Environment:
+        Variables:
+          YNC_EMAIL_SEND_ADDRESS: !Ref SenderAddress
+          YNC_EMAIL_RECIPIENT: !Ref RecipientAddress
       Policies:
         - Statement:
           - Sid: YncPolicy
@@ -26,6 +38,7 @@ Resources:
               - dynamodb:*
               - sns:*
               - rekognition:*
+              - ses:*
             Resource: '*'
       Events:
         YncScraperSchedule:

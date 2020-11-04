@@ -8,22 +8,8 @@ import logging
 
 from bs4 import BeautifulSoup
 from pprint import pprint, pformat
-from pynamodb.models import Model
-from pynamodb.attributes import UnicodeAttribute, ListAttribute, NumberAttribute
-
-class YncListing(Model):
-    class Meta:
-        table_name = "ync-database"
-        region = "eu-west-1"
-    VehicleId = NumberAttribute(hash_key=True)
-    _VehicleId = NumberAttribute()
-    VehicleTitle = UnicodeAttribute()
-    VehicleDescription = UnicodeAttribute()
-    VehiclePriceNumber = NumberAttribute()
-    VehicleFeatures = ListAttribute()
-    VehicleMileage = UnicodeAttribute()
-    DetectedVehicleNumberplate = UnicodeAttribute()
-    ListingLink = UnicodeAttribute()
+from publisher.aws import EmailPublisher
+from models.ync import YncListing
 
 BASE_URL = "https://www.yournextcarltd.co.uk"
 SEARCH_URL = "https://www.yournextcarltd.co.uk/search_page.php?budgetswitch=0&vehicle_type=car&sort=l&make=8&model=&body=&gearbox=automatic&doors=&body_colour=&fuel_type=&seats=&yearmin=2016&yearmax=2018&budgetmin=&budgetmax=25000"
@@ -36,6 +22,8 @@ if logger.handlers:
     for handler in logger.handlers:
         logger.removeHandler(handler)
 logging.basicConfig(level=logging.INFO)
+
+publisher = EmailPublisher(sender=os.environ.get("YNC_EMAIL_SEND_ADDRESS"), recipient=os.environ.get("YNC_EMAIL_RECIPIENT"), logger=logger)
 
 def remove_sold_cars():
     cars = YncListing.scan()
@@ -56,7 +44,7 @@ def cast_price_to_int(price):
     return int(parsed_price)
 
 def publish_new_car_notification(database_item: YncListing):
-    client = boto3.client('sns')
+    logger.info("Attempting to send new car notification")
     message = f"""
         A new car has been listed on YNC!
         {database_item.VehicleTitle}
@@ -65,23 +53,10 @@ def publish_new_car_notification(database_item: YncListing):
         Price: £{database_item.VehiclePriceNumber}
         {database_item.ListingLink}
         """
-    if os.environ.get('YNC_DEBUG_MODE'):
-        logger.info(message)
-    else:
-        logger.info(message)
-        client.publish(
-            TopicArn=SNS_TOPIC_ARN,Subject="Car listed on YNC has changed in price", 
-            Message=message,
-            MessageAttributes = {
-                'AWS.SNS.SMS.SMSType': {
-                    'DataType': 'String',
-                    'StringValue': 'Promotional'
-                    }
-                }
-            )
+    publisher.publish("A new car has been listed on YNC!", message)
 
 def publish_price_change_notification(database_item: YncListing, old_price, new_price):
-    client = boto3.client('sns')
+    logger.info("Attempting to send price change notification")
     message = f"""
         A car listed on YNC has changed in price!
         {database_item.VehicleTitle}
@@ -89,42 +64,16 @@ def publish_price_change_notification(database_item: YncListing, old_price, new_
         New Price: £{new_price}
         {database_item.ListingLink}
         """
-    if os.environ.get('YNC_DEBUG_MODE'):
-        logger.info(message)
-    else:
-        logger.info(message)
-        client.publish(
-            TopicArn=SNS_TOPIC_ARN,Subject="Car listed on YNC has changed in price", 
-            Message=message,
-            MessageAttributes = {
-                'AWS.SNS.SMS.SMSType': {
-                    'DataType': 'String',
-                    'StringValue': 'Promotional'
-                    }
-                }
-            )
+    publisher.publish("A car has change in price on YNC!", message)
 
 def publish_vehicle_sold_notification(database_item: YncListing):
-    client = boto3.client('sns')
+    logger.info("Attempting to send vehicle sold notification")
     message = f"""
         A car listed on YNC has been sold! :(
         {database_item.VehicleTitle}
         """
-    if os.environ.get('YNC_DEBUG_MODE'):
-        logger.info(message)
-    else:
-        logger.info(message)
-        client.publish(
-            TopicArn=SNS_TOPIC_ARN,Subject="Car listed on YNC has been sold", 
-            Message=message,
-            MessageAttributes = {
-                'AWS.SNS.SMS.SMSType': {
-                    'DataType': 'String',
-                    'StringValue': 'Promotional'
-                    }
-                }
-            )
-
+    publisher.publish("A car listed on YNC has been sold!", message)
+    
 def lambda_handler(event, context):
     results = requests.get(SEARCH_URL)
     parsed_results = BeautifulSoup(results.content, 'html.parser')
@@ -153,6 +102,7 @@ def lambda_handler(event, context):
             database_item = YncListing.get(int(vehicle_id))
             database_item.VehicleId = database_item._VehicleId
             vehicle_price = cast_price_to_int(car.find(class_='price-is').next)
+            logger.info(f"Checking {vehicle_id} price, last: {database_item.VehiclePriceNumber} current: {vehicle_price}")
             if vehicle_price != database_item.VehiclePriceNumber:
                 publish_price_change_notification(database_item, database_item.VehiclePriceNumber,vehicle_price)
                 database_item.VehiclePriceNumber = vehicle_price
